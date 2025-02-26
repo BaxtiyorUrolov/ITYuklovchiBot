@@ -5,6 +5,7 @@ import (
 	"fmt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"log"
+	"os"
 	"strings"
 	"yuklovchiBot/admin"
 	"yuklovchiBot/pkg/state"
@@ -64,6 +65,7 @@ func handleMessage(msg *tgbotapi.Message, db *sql.DB, botInstance *tgbotapi.BotA
 func handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, db *sql.DB, botInstance *tgbotapi.BotAPI) {
 	chatID := callbackQuery.Message.Chat.ID
 	messageID := callbackQuery.Message.MessageID
+	data := callbackQuery.Data
 
 	channels, err := storage.GetChannelsFromDatabase(db)
 	if err != nil {
@@ -71,13 +73,14 @@ func handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, db *sql.DB, botI
 		return
 	}
 
-	if callbackQuery.Data == "check_subscription" {
+	switch {
+	// 1) Foydalanuvchi obunani tekshirish
+	case callbackQuery.Data == "check_subscription":
 		if isUserSubscribedToChannels(chatID, channels, botInstance) {
 			deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 			botInstance.Send(deleteMsg)
 
 			welcomeMessage := fmt.Sprintf("👋 Assalomu alaykum [%s](tg://user?id=%d) botimizga xush kelibsiz.", callbackQuery.From.FirstName, callbackQuery.From.ID)
-
 			msg := tgbotapi.NewMessage(chatID, welcomeMessage)
 			msg.ParseMode = "Markdown"
 			_, err = botInstance.Send(msg)
@@ -91,21 +94,90 @@ func handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, db *sql.DB, botI
 			msg.ReplyMarkup = inlineKeyboard
 			botInstance.Send(msg)
 		}
-	} else if strings.HasPrefix(callbackQuery.Data, "delete_channel_") {
+
+	// 2) Kanalni o‘chirishga doir callback
+	case strings.HasPrefix(callbackQuery.Data, "delete_channel_"):
 		channel := strings.TrimPrefix(callbackQuery.Data, "delete_channel_")
 		admin.AskForChannelDeletionConfirmation(chatID, messageID, channel, botInstance)
 		deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 		botInstance.Send(deleteMsg)
-	} else if strings.HasPrefix(callbackQuery.Data, "confirm_delete_channel_") {
+
+	case strings.HasPrefix(callbackQuery.Data, "confirm_delete_channel_"):
 		channel := strings.TrimPrefix(callbackQuery.Data, "confirm_delete_channel_")
 		admin.DeleteChannel(chatID, messageID, channel, db, botInstance)
 		deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
 		botInstance.Send(deleteMsg)
-	} else if callbackQuery.Data == "cancel_delete_channel" {
+
+	case callbackQuery.Data == "cancel_delete_channel":
 		admin.CancelChannelDeletion(chatID, messageID, botInstance)
+
+	// 3) **Yangi qo‘shilgan: Instagram audio yuklash callback**
+	case strings.HasPrefix(data, "download_insta_audio|"):
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			videoFile := parts[1]
+			downloadAndSendInstaAudio(chatID, videoFile, botInstance)
+
+			err := os.Remove(videoFile)
+			if err != nil {
+				log.Printf("Xatolik: Video faylni o‘chirishda xatolik: %v", err)
+			} else {
+				log.Printf("Fayl o‘chirildi: %s", videoFile)
+			}
+		}
+		RemoveInlineKeyboardAndUpdateCaption(chatID, botInstance)
+
+	// 🎯 Agar foydalanuvchi "Yo‘q" bosgan bo‘lsa, videoni o‘chirib tashlaymiz
+	case strings.HasPrefix(data, "skip_insta_audio|"):
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			videoFile := parts[1]
+
+			// 📌 Videoni o‘chiramiz (faqat serverdan)
+			err := os.Remove(videoFile)
+			if err != nil {
+				log.Printf("Xatolik: Video faylni o‘chirishda xatolik: %v", err)
+			} else {
+				log.Printf("Fayl o‘chirildi: %s", videoFile)
+			}
+		}
+		RemoveInlineKeyboardAndUpdateCaption(chatID, botInstance) // ✅ Tugmalarni o‘chirish va captionni yangilash
+
+	// 4) Xuddi shu uslubda TikTok audio yuklash callback’lari ham qo‘shishingiz mumkin
+	case strings.HasPrefix(data, "download_tiktok_audio|"):
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			videoFile := parts[1]
+			downloadAndSendTikTokAudio(chatID, videoFile, botInstance)
+
+			// ✅ Audio yuborilgandan keyin videoni o‘chirib tashlaymiz
+			err := os.Remove(videoFile)
+			if err != nil {
+				log.Printf("Xatolik: Video faylni o‘chirishda xatolik: %v", err)
+			} else {
+				log.Printf("Fayl o‘chirildi: %s", videoFile)
+			}
+		}
+		RemoveInlineKeyboardAndUpdateCaption(chatID, botInstance)
+
+	// 🎯 Agar foydalanuvchi "Yo‘q" bosgan bo‘lsa, videoni **lokaldan o‘chirib tashlaymiz**
+	case strings.HasPrefix(data, "skip_tiktok_audio|"):
+		parts := strings.SplitN(data, "|", 2)
+		if len(parts) == 2 {
+			videoFile := parts[1]
+			err := os.Remove(videoFile)
+			if err != nil {
+				log.Printf("Xatolik: Video faylni o‘chirishda xatolik: %v", err)
+			} else {
+				log.Printf("Fayl o‘chirildi: %s", videoFile)
+			}
+		}
+		RemoveInlineKeyboardAndUpdateCaption(chatID, botInstance)
+
+	default:
+		log.Printf("Unknown callback data: %s", callbackQuery.Data)
 	}
 }
-
 func handleStartCommand(msg *tgbotapi.Message, db *sql.DB, botInstance *tgbotapi.BotAPI) {
 	chatID := msg.Chat.ID
 	userID := msg.From.ID
@@ -220,4 +292,35 @@ func createSubscriptionKeyboard(channels []string) tgbotapi.InlineKeyboardMarkup
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(checkButton))
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func RemoveInlineKeyboardAndUpdateCaption(chatID int64, botInstance *tgbotapi.BotAPI) {
+	// Xabar ID'sini olish
+	messageID, exists := state.GetMessageID(chatID)
+	if !exists {
+		log.Printf("Xatolik: Chat %d uchun xabar topilmadi", chatID)
+		return
+	}
+
+	// 📌 Xabar captionini faqat "Siz so‘ragan video." qilib yangilash
+	editMsg := tgbotapi.NewEditMessageCaption(chatID, messageID, "Siz so‘ragan video.")
+	editMsg.ParseMode = "Markdown"
+	editMsg.ReplyMarkup = nil // 📌 Inline tugmalarni olib tashlaymiz
+
+	_, err := botInstance.Send(editMsg)
+	if err != nil {
+		log.Printf("Xabarni yangilashda xatolik: %v", err)
+	}
+}
+
+// 🎯 "Ha" va "Yo‘q" tugmalarini yaratish
+func createAudioOptionKeyboard(platform, videoPath string) tgbotapi.InlineKeyboardMarkup {
+	haData := fmt.Sprintf("download_%s_audio|%s", platform, videoPath)
+	yoqData := fmt.Sprintf("skip_%s_audio|%s", platform, videoPath)
+
+	haButton := tgbotapi.NewInlineKeyboardButtonData("Ha", haData)
+	yoqButton := tgbotapi.NewInlineKeyboardButtonData("Yo‘q", yoqData)
+
+	row := tgbotapi.NewInlineKeyboardRow(haButton, yoqButton)
+	return tgbotapi.NewInlineKeyboardMarkup(row)
 }
