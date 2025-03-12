@@ -104,13 +104,28 @@ func downloadTikTokVideo(videoLink string) (string, error) {
 }
 
 // 📌 TikTok videoni yuklab olish va foydalanuvchiga yuborish
-func downloadAndSendTikTokVideo(chatID int64, videoURL string, botInstance *tgbotapi.BotAPI) {
+func downloadAndSendTikTokVideo(chatID int64, videoURL string, botInstance *tgbotapi.BotAPI, loadingMsgID int) {
+
+	loadingDeleted := false
+	deleteLoading := func() {
+		if !loadingDeleted && loadingMsgID != 0 {
+			_, err := botInstance.Send(tgbotapi.NewDeleteMessage(chatID, loadingMsgID))
+			if err != nil {
+				log.Printf("Loading xabarini o'chirishda xatolik: %v", err)
+			}
+			loadingDeleted = true
+		}
+	}
+
 	// TikTok video faylini yuklab olib, lokal yo'lni olamiz.
 	filePath, err := downloadTikTokVideo(videoURL)
 	if err != nil {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("❌ Video yuklab olishda xatolik yuz berdi: %s", err)))
 		return
 	}
+
+	deleteLoading()
 
 	// Video yuborish uchun Telegram video xabarini yaratamiz.
 	videoMsg := tgbotapi.NewVideoUpload(chatID, filePath)
@@ -135,6 +150,7 @@ func downloadAndSendTikTokVideo(chatID int64, videoURL string, botInstance *tgbo
 func downloadAndSendTikTokAudio(chatID int64, videoFile string, botInstance *tgbotapi.BotAPI) {
 	audioFile, err := extractAudio(videoFile)
 	if err != nil {
+
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Audio ajratishda xatolik yuz berdi."))
 		return
 	}

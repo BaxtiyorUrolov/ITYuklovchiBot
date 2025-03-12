@@ -24,19 +24,33 @@ type VideoResponse struct {
 }
 
 // 📌 1️⃣ Videoni yuklab, keyin foydalanuvchiga yuborish
-func downloadAndSendInstaVideo(chatID int64, videoURL string, botInstance *tgbotapi.BotAPI) {
+func downloadAndSendInstaVideo(chatID int64, videoURL string, botInstance *tgbotapi.BotAPI, loadingMsgID int) {
+
+	loadingDeleted := false
+	deleteLoading := func() {
+		if !loadingDeleted && loadingMsgID != 0 {
+			_, err := botInstance.Send(tgbotapi.NewDeleteMessage(chatID, loadingMsgID))
+			if err != nil {
+				log.Printf("Loading xabarini o'chirishda xatolik: %v", err)
+			}
+			loadingDeleted = true
+		}
+	}
+
 	instaApi := config.Load().InstaApi
 
 	// API'ga so‘rov yuborish
 	apiURL := fmt.Sprintf("%s%s", instaApi, videoURL)
 	resp, err := http.Get(apiURL)
 	if err != nil {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Video yuklab olishda xatolik yuz berdi."))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Video yuklab olinmadi. Iltimos, boshqa linkni sinab ko'ring."))
 		return
 	}
@@ -45,12 +59,14 @@ func downloadAndSendInstaVideo(chatID int64, videoURL string, botInstance *tgbot
 	var videoResp VideoResponse
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ API javobini o‘qishda xatolik yuz berdi."))
 		return
 	}
 
 	err = json.Unmarshal(body, &videoResp)
 	if err != nil || videoResp.Status != "success" {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Video yuklab olishda muammo bor."))
 		return
 	}
@@ -58,9 +74,12 @@ func downloadAndSendInstaVideo(chatID int64, videoURL string, botInstance *tgbot
 	// 📌 2️⃣ Videoni **lokalga** yuklab olamiz
 	videoFile, err := downloadFile(videoResp.Data.VideoURL, "temp_insta_", ".mp4")
 	if err != nil {
+		deleteLoading()
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Video yuklab olishda xatolik."))
 		return
 	}
+
+	deleteLoading()
 
 	// 📌 3️⃣ Videoni foydalanuvchiga yuborish
 	videoMsg := tgbotapi.NewVideoUpload(chatID, videoFile)
@@ -75,12 +94,6 @@ func downloadAndSendInstaVideo(chatID int64, videoURL string, botInstance *tgbot
 	// Xabar ID'sini saqlaymiz (keyinchalik tugmani o‘chirish uchun)
 	messageID := sentMsg.MessageID
 	state.SaveMessageID(chatID, messageID)
-}
-
-// 📌 6️⃣ Inline tugmalarni olib tashlash (xabarni tahrirlash)
-func removeInlineKeyboard(chatID int64, messageID int, botInstance *tgbotapi.BotAPI) {
-	edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, tgbotapi.InlineKeyboardMarkup{})
-	botInstance.Send(edit)
 }
 
 // 📌 7️⃣ Yuklab olish funksiyasi

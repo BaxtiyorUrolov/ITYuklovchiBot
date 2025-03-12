@@ -54,7 +54,10 @@ func handleMessage(msg *tgbotapi.Message, db *sql.DB, botInstance *tgbotapi.BotA
 
 	if text == "/start" {
 		handleStartCommand(msg, db, botInstance)
-		storage.AddUserToDatabase(db, int(msg.Chat.ID))
+		err := storage.AddUserToDatabase(db, int(msg.Chat.ID))
+		if err != nil {
+			log.Printf("Error adding user to database: %v", err)
+		}
 	} else if text == "/admin" {
 		admin.HandleAdminCommand(msg, db, botInstance)
 	} else {
@@ -78,7 +81,11 @@ func handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, db *sql.DB, botI
 	case callbackQuery.Data == "check_subscription":
 		if isUserSubscribedToChannels(chatID, channels, botInstance) {
 			deleteMsg := tgbotapi.NewDeleteMessage(chatID, messageID)
-			botInstance.Send(deleteMsg)
+			_, err := botInstance.Send(deleteMsg)
+			if err != nil {
+				log.Printf("Error sending newmessage: %v", err)
+				return
+			}
 
 			welcomeMessage := fmt.Sprintf("👋 Assalomu alaykum [%s](tg://user?id=%d) botimizga xush kelibsiz.", callbackQuery.From.FirstName, callbackQuery.From.ID)
 			msg := tgbotapi.NewMessage(chatID, welcomeMessage)
@@ -174,6 +181,9 @@ func handleCallbackQuery(callbackQuery *tgbotapi.CallbackQuery, db *sql.DB, botI
 		}
 		RemoveInlineKeyboardAndUpdateCaption(chatID, botInstance)
 
+	case strings.HasPrefix(data, "youtube_download|"):
+		HandleYouTubeDownloadCallback(chatID, messageID, data, botInstance)
+
 	default:
 		log.Printf("Unknown callback data: %s", callbackQuery.Data)
 	}
@@ -219,12 +229,23 @@ func handleDefaultMessage(msg *tgbotapi.Message, db *sql.DB, botInstance *tgbota
 	text := msg.Text
 
 	if strings.HasPrefix(text, "https://www.instagram.com/") || strings.HasPrefix(text, "instagram") {
-		downloadAndSendInstaVideo(chatID, text, botInstance)
+		loadingMsg, err := botInstance.Send(tgbotapi.NewMessage(chatID, "⌛️"))
+		if err != nil {
+			log.Printf("Loading xabarini yuborishda xatolik: %v", err)
+		}
+
+		downloadAndSendInstaVideo(chatID, text, botInstance, loadingMsg.MessageID)
 		return
 	}
 
 	if strings.HasPrefix(text, "https://www.tiktok.com/") || strings.HasPrefix(text, "tiktok") {
-		downloadAndSendTikTokVideo(chatID, text, botInstance)
+
+		loadingMsg, err := botInstance.Send(tgbotapi.NewMessage(chatID, "⌛️"))
+		if err != nil {
+			log.Printf("Loading xabarini yuborishda xatolik: %v", err)
+		}
+
+		downloadAndSendTikTokVideo(chatID, text, botInstance, loadingMsg.MessageID)
 		return
 	}
 
