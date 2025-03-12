@@ -141,7 +141,6 @@ func downloadAndSendInstaAudio(chatID int64, videoFile string, botInstance *tgbo
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Audio ajratishda xatolik yuz berdi."))
 		return
 	}
-	defer os.Remove(audioFile) // 🎯 Audio faylni yuborgach o‘chirib tashlaymiz
 
 	// Audio faylni foydalanuvchiga yuborish
 	audioMsg := tgbotapi.NewAudioUpload(chatID, audioFile)
@@ -149,4 +148,6 @@ func downloadAndSendInstaAudio(chatID int64, videoFile string, botInstance *tgbo
 	if _, err := botInstance.Send(audioMsg); err != nil {
 		log.Printf("Audio yuborishda xatolik: %v", err)
 	}
+	defer os.Remove(audioFile) // 🎯 Audio faylni yuborgach o‘chirib tashlaymiz
+
 }

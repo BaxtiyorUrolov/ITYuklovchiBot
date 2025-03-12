@@ -142,8 +142,6 @@ func downloadAndSendTikTokVideo(chatID int64, videoURL string, botInstance *tgbo
 	// Xabar ID'sini saqlaymiz (keyinchalik tugmalarni o‘chirish uchun)
 	state.SaveMessageID(chatID, sentMsg.MessageID)
 
-	// Logga video fayl yo'lini chiqarish (agar kerak bo'lsa)
-	log.Printf("Video muvaffaqiyatli yuklab olindi: %s", filePath)
 }
 
 // 📌 TikTok videodan audio ajratish va foydalanuvchiga yuborish
@@ -154,7 +152,6 @@ func downloadAndSendTikTokAudio(chatID int64, videoFile string, botInstance *tgb
 		botInstance.Send(tgbotapi.NewMessage(chatID, "❌ Audio ajratishda xatolik yuz berdi."))
 		return
 	}
-	defer os.Remove(audioFile)
 
 	// Audio faylni foydalanuvchiga yuborish
 	audioMsg := tgbotapi.NewAudioUpload(chatID, audioFile)
@@ -162,4 +159,6 @@ func downloadAndSendTikTokAudio(chatID int64, videoFile string, botInstance *tgb
 	if _, err := botInstance.Send(audioMsg); err != nil {
 		log.Printf("Audio yuborishda xatolik: %v", err)
 	}
+	defer os.Remove(audioFile)
+
 }
